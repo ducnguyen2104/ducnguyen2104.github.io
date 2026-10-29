@@ -1,7 +1,7 @@
 ---
 title: "BDD Without a Gherkin Runner"
 date: 2026-10-29
-draft: true
+draft: false
 tags: ["testing", "bdd", "swift", "ios"]
 description: "Keep Gherkin scenarios as the spec, let Swift Testing do the testing, and use a small checker to keep the two from drifting apart."
 ---
@@ -269,8 +269,6 @@ A Gherkin runner closes that gap by construction, because each `Then` line *is* 
 
 In practice this is the main cost of the approach. The checker removes the drift; reviewers still have to judge whether the test is complete.
 
-**[TODO: add your own experience here: how often reviews caught a partial test, and whether it was worth the trade.]**
-
 ## When to choose this over a runner
 
 **Choose spec + checker when:**
@@ -293,5 +291,3 @@ The approach comes down to four rules:
 4. Reviewers check that a linked test asserts every `Then` line.
 
 It's less magic than Cucumber, and that's the point: nothing to learn beyond Gherkin, Swift Testing and a short Python script.
-
-**[TODO: closing line: what you'd do differently, or a link to a follow-up post.]**
