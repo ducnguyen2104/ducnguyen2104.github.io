@@ -1,27 +1,102 @@
 ---
-title: "BDD Without a Gherkin Runner"
+title: "From Specs to Test Cases: Behavior-Driven Development with XCTest"
 date: 2026-10-29
 draft: false
-tags: ["testing", "bdd", "swift", "ios"]
-description: "Keep Gherkin scenarios as the spec, let Swift Testing do the testing, and use a small checker to keep the two from drifting apart."
+tags: ["testing", "bdd", "swift", "ios", "xctest"]
+description: "What BDD is, why it beats a folder of unrelated test cases, and how to use it on iOS with plain Swift Testing, XCTest and XCUITest. No Cucumber required."
 ---
 
-Most teams that try BDD end up with one of two problems. Either the `.feature` files are documentation that nobody runs, and they drift from the app within a sprint. Or the team adopts a Gherkin runner and spends its time maintaining step definitions instead of tests.
+If you write iOS tests today, you probably have a folder of unit tests and maybe a few UI tests. They pass, CI is green, and yet nobody can say what the app is *supposed* to do, or which important cases have no test at all.
 
-On iOS the second option is harder than it sounds. There's no official Cucumber for Swift, the community runners don't fit Swift Testing, and debugging a failure means jumping from a feature line to a regex to the step code to the app.
+Behavior-Driven Development (BDD) is a way to fix that. This post explains BDD from scratch, then shows a lightweight way to use it with the tools you already have: **Swift Testing, XCTest and XCUITest**. No Cucumber, no new test framework.
 
-This post describes a middle path: **keep Gherkin as the spec, write ordinary Swift tests, and use a small script to prove every scenario points to a real test.** No runner, no step definitions, and no silent drift.
+## What is BDD?
+
+BDD means you **describe how a feature should behave, in plain language, before you test it**. Each description is a short, concrete example called a *scenario*:
+
+```gherkin
+Scenario: An item with an empty name cannot be added
+  Given the user is on the "Add item" screen
+  When the user taps "Add" without typing a name
+  Then the item is not added
+  And the "Add" button stays disabled
+```
+
+Every scenario has the same three parts:
+
+- **Given**: the starting situation.
+- **When**: the one thing the user (or the system) does.
+- **Then**: what should be true afterwards.
+
+That format is called **Gherkin**, and scenarios live in plain text files ending in `.feature`. Each scenario then gets a test that proves the app really behaves that way.
+
+The key word is *behavior*. A scenario talks about what the user sees and does, never about view models, stores or network calls. That's what lets a product manager, a designer, or a QA engineer read it and say "that's wrong" or "you forgot the offline case".
+
+### A few terms you'll see
+
+| Term | Meaning |
+| --- | --- |
+| Feature file | A `.feature` text file holding the scenarios for one feature. |
+| Scenario | One example of behavior, written as Given / When / Then. |
+| Gherkin | The name of that Given / When / Then format. |
+| Step definition | Code that a runner matches to each Gherkin line so it can execute it. |
+| Runner | A tool such as Cucumber that executes `.feature` files directly. |
+
+You won't need step definitions or a runner in this post. They're listed so you recognize them in other BDD articles.
+
+## Why not just write test cases?
+
+Here's a typical test without BDD:
+
+```swift
+final class ShoppingListTests: XCTestCase {
+    func testAddItem() async {
+        let viewModel = AddItemViewModel(store: InMemoryListStore())
+        viewModel.name = ""
+        await viewModel.addTapped()
+        XCTAssertTrue(viewModel.items.isEmpty)
+    }
+}
+```
+
+Nothing is wrong with it, but look at what's missing:
+
+- **The name doesn't say what's expected.** `testAddItem` could be testing anything. You have to read the code to learn the rule.
+- **It's half a test.** The rule also says the button stays disabled, and nothing checks that. Nobody notices, because the rule was never written down.
+- **Only developers can review it.** A product manager can't look at this file and tell you whether the behavior is right.
+- **Gaps are invisible.** A folder of tests shows what *is* tested. It can't show what *isn't*: the offline case, the 200-character name, the double tap.
+
+BDD flips the order. You write the list of behaviors first, then a test for each one. That gives you:
+
+1. **A spec everyone can read.** Wrong or missing behavior gets caught in review, before any code is written.
+2. **Visible gaps.** A scenario with no test stands out. A test that was never written doesn't.
+3. **Better unhappy paths.** Writing scenarios makes you ask "what if it fails?" up front, instead of after a bug report.
+4. **Tests that explain themselves.** `anEmptyNameIsRejected` tells you the rule; `testAddItem` doesn't.
+
+It isn't free: you now maintain a `.feature` file next to your tests. It pays off for features with real rules and edge cases (forms, payments, sync, permissions). For a static "About" screen, skip it.
+
+## The usual problem with BDD
+
+Most teams that try BDD end up with one of two problems:
+
+1. **The `.feature` files are just documents.** Nothing connects them to the tests, so they drift away from the app within a sprint.
+2. **The team adopts a runner** such as Cucumber, and spends its time maintaining step definitions instead of tests.
+
+On iOS, option 2 is harder than it sounds. There's no official Cucumber for Swift, the community runners don't fit Swift Testing, and debugging a failure means jumping from a feature line to a regex to the step code to the app.
+
+This post takes a middle path: **keep Gherkin as the spec, write ordinary XCTest and Swift Testing tests, and use a small script to prove every scenario points to a real test.**
 
 ## The idea in one picture
 
 ```
-Specs/ShoppingList.feature      →  the contract, in plain language
-        │  @covered-by / test name
+Specs/ShoppingList.feature        →  what the app should do, in plain language
+        │  each scenario names its test
         ▼
-Tests/…/ShoppingListTests.swift →  the proof, in Swift Testing
+ShoppingListTests/…               →  unit tests (Swift Testing or XCTest)
+ShoppingListUITests/…             →  UI tests (XCUITest)
         ▲
-        │  checks the link exists
-Scripts/check-specs.py          →  runs on every pull request
+        │  checks that every named test exists
+Scripts/check-specs.py            →  runs on every pull request
 ```
 
 A scenario is never "just documentation". It either names the test that proves it, or it says why there isn't one yet.
@@ -36,72 +111,149 @@ Feature: Shopping list
   Background:
     Given the user is signed in with a list called "Weekend"
 
-  # SL_012
-  @SL_012 @req:REQ_SL_012 @validation
-  @severity:medium @priority:P2 @covered-by:AddItemViewModelTests.anEmptyNameIsRejected
+  @SL_012 @validation @covered-by:AddItemViewModelTests.anEmptyNameIsRejected
   Scenario: An item with an empty name cannot be added
     When the user adds an item with an empty name
     Then the item is not added
     And the add button stays disabled
 ```
 
-The tags carry all the machine-readable information:
+`Background` holds the `Given` steps shared by every scenario in the file. The tags on the line above `Scenario` carry the information the script needs:
 
 | Tag | Purpose |
 | --- | --- |
 | `@SL_012` | A stable ID. Never reused or renumbered, even when scenarios are deleted. |
-| `@req:REQ_SL_012` | Links to a row in a requirements register (more on that below). |
-| `@validation` | One of three categories: `@happy_path`, `@validation`, `@edge_security`. |
-| `@severity:` / `@priority:` | Lets you filter what matters for a release. |
-| `@covered-by:Type.method` | The Swift test that proves this scenario. |
+| `@validation` | One of three categories: `@happy_path`, `@validation`, `@edge_case`. |
+| `@covered-by:Type.method` | The test that proves this scenario. |
 
 ## Three ways to be "covered"
 
 Every scenario must be in exactly one of these states.
 
-**1. An existing test already proves it.** Point at it:
-
-```gherkin
-@covered-by:AddItemViewModelTests.anEmptyNameIsRejected
-```
-
-**2. No test exists yet, so write one named after the scenario:**
+**1. An existing test already proves it.** Point at it with `@covered-by`, as in the scenario above. This Swift Testing test is the one it names:
 
 ```swift
+import Testing
+@testable import ShoppingList
+
 @MainActor
-struct ShoppingListScenarioTests {
-    // SL_014
+struct AddItemViewModelTests {
     @Test
-    func test_SL_014_aFailedSaveKeepsTheDraft() async throws {
-        let store = ScriptedListStore(save: .failure(.offline))
+    func anEmptyNameIsRejected() async {
+        let store = InMemoryListStore()
         let viewModel = AddItemViewModel(store: store)
 
-        await viewModel.send(.nameChanged("Milk"))
-        await viewModel.send(.addTapped)
+        viewModel.name = ""
+        await viewModel.addTapped()
 
-        #expect(viewModel.state.draftName == "Milk")
-        #expect(viewModel.state.error == .offline)
-        #expect(store.savedItems.isEmpty)
+        #expect(store.items.isEmpty)               // Then the item is not added
+        #expect(viewModel.isAddButtonEnabled == false) // And the add button stays disabled
     }
 }
 ```
 
-The `test_SL_014_` prefix is the link, so the scenario needs no extra tag.
+Each `Then` line has a matching assertion. That's the rule that makes "covered" mean something.
+
+**2. No test exists yet, so write one named after the scenario.** Start the method name with `test_` plus the scenario ID. XCTest needs the `test` prefix anyway:
+
+```swift
+import XCTest
+@testable import ShoppingList
+
+@MainActor
+final class ShoppingListScenarioTests: XCTestCase {
+    // SL_014: A failed save keeps what the user typed
+    func test_SL_014_aFailedSaveKeepsTheDraft() async {
+        let store = FailingListStore(error: .offline)
+        let viewModel = AddItemViewModel(store: store)
+
+        viewModel.name = "Milk"
+        await viewModel.addTapped()
+
+        XCTAssertEqual(viewModel.name, "Milk")
+        XCTAssertEqual(viewModel.error, .offline)
+        XCTAssertTrue(store.items.isEmpty)
+    }
+}
+```
+
+The `test_SL_014_` prefix is the link, so the scenario doesn't need a `@covered-by` tag.
 
 **3. It can't be tested yet, and the spec says why:**
 
 ```gherkin
-@SL_031 @req:REQ_SL_031 @edge_security
-@severity:high @priority:P1 @blocked:mock
+@SL_031 @edge_case @blocked:mock
 # The mock backend cannot return a list shared by two users yet.
 Scenario: A list removed by its owner disappears for everyone
 ```
 
-Use a small, fixed vocabulary of statuses, such as `@automation-pending`, `@blocked:<reason>`, `@manual` and `@gap` (for behavior the product doesn't have yet). What matters is that "untested" is a **visible, deliberate state**, not an accident.
+Keep a small, fixed set of these statuses, such as `@automation-pending`, `@blocked:<reason>` and `@manual`. What matters is that "untested" is a **visible, deliberate choice**, not an accident.
+
+## Unit test or UI test?
+
+A scenario describes behavior, not *how* to test it. Pick the cheapest test that proves every `Then` line:
+
+| The scenario is about… | Write a… | With |
+| --- | --- | --- |
+| A rule or validation (empty name, max length) | Unit test on the view model | Swift Testing or XCTest |
+| Error handling (offline, failed save) | Unit test with a fake store | Swift Testing or XCTest |
+| A journey across screens | UI test | XCUITest |
+
+Most scenarios should be unit tests. They run in milliseconds and rarely flake. Save UI tests for a handful of journeys that really need the whole app, like this one:
+
+```gherkin
+@SL_001 @happy_path
+Scenario: The user adds an item to the list
+  When the user adds an item called "Milk"
+  Then "Milk" appears in the list
+```
+
+```swift
+import XCTest
+
+@MainActor
+final class ShoppingListUITests: XCTestCase {
+    // SL_001: The user adds an item to the list
+    func test_SL_001_theUserAddsAnItem() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-useMockData"]
+        app.launch()
+
+        app.buttons["addItemButton"].tap()
+        let nameField = app.textFields["itemNameField"]
+        nameField.tap()
+        nameField.typeText("Milk")
+        app.buttons["saveItemButton"].tap()
+
+        XCTAssertTrue(app.staticTexts["Milk"].waitForExistence(timeout: 5))
+    }
+}
+```
+
+Three habits keep UI tests reliable:
+
+- **Use mock data.** A launch argument such as `-useMockData` tells the app to load canned responses instead of calling the real backend.
+- **Find elements by accessibility identifier**, like `addItemButton`, not by their title. Button text changes; identifiers don't.
+- **Never `sleep`.** Use `waitForExistence(timeout:)`, which returns as soon as the element appears.
+
+## Don't only write happy paths
+
+Left alone, a spec fills up with happy paths, because they're the easiest to write. A rough target keeps it honest:
+
+- **~20% `@happy_path`**: the main journey works.
+- **~40% `@validation`**: bad input, limits and rejected actions.
+- **~40% `@edge_case`**: offline, slow network, double taps, missing permissions, the app going to the background.
+
+Treat the numbers as a prompt, not a quota. If one category is thin, ask what's missing. Don't add filler scenarios to hit the target.
 
 ## The checker
 
-The whole mechanism is a short script. It's not a Gherkin parser and doesn't run anything. It checks structure and that every link points somewhere real:
+The script is what keeps the spec and the tests from drifting apart. It doesn't run any tests and it isn't a full Gherkin parser. For every scenario it checks that:
+
+- it has exactly one ID and one category,
+- it has at least one `Given`, `When` and `Then`,
+- any test named in `@covered-by` really exists,
+- it has a test (by tag or by `test_<ID>_` name), or a pending status.
 
 ```python
 #!/usr/bin/env python3
@@ -110,10 +262,12 @@ import re
 import sys
 from pathlib import Path
 
-CATEGORIES = {"@happy_path", "@validation", "@edge_security"}
-PENDING = ("@automation-pending", "@blocked:", "@manual", "@gap", "@pending-spec")
+SPECS = Path("Specs")
+TEST_DIRS = [Path("ShoppingListTests"), Path("ShoppingListUITests")]
+CATEGORIES = {"@happy_path", "@validation", "@edge_case"}
+PENDING = ("@automation-pending", "@blocked:", "@manual")
 
-swift_files = [p.read_text() for p in Path("Tests").rglob("*.swift")]
+swift_files = [p.read_text() for folder in TEST_DIRS for p in folder.rglob("*.swift")]
 
 
 def scenarios(path):
@@ -142,7 +296,7 @@ def test_exists(type_name, method):
 
 
 errors, seen = [], set()
-for path in sorted(Path("Specs").glob("*.feature")):
+for path in sorted(SPECS.glob("*.feature")):
     for scenario in scenarios(path):
         tags, where = scenario["tags"], scenario["where"]
         ids = [t[1:] for t in tags if re.fullmatch(r"@[A-Z]+_\d{3}", t)]
@@ -171,110 +325,31 @@ print("\n".join(errors) or "every scenario traces to a test or says why not")
 sys.exit(1 if errors else 0)
 ```
 
-Run it in CI, and a pull request that renames `anEmptyNameIsRejected` without updating the spec fails immediately. That's the drift problem solved at the cheapest possible point.
+Change `TEST_DIRS` to your own test target folders, then run `python3 Scripts/check-specs.py` from the project root. Add the same command as a step in CI. Now a pull request that renames `anEmptyNameIsRejected` without updating the spec fails straight away, which is the cheapest moment to catch drift.
 
-You can grow it from here: check that every `@req:` tag has a row in the register, that a `Scenario Outline` has an `Examples` table naming its placeholders, or print counts per category.
+When a scenario is broken, the output points at the exact line:
 
-## A register for where each requirement came from
-
-Next to each `.feature` file, keep a plain Markdown table:
-
-```markdown
-| Requirement | Scenario | Requirement in one line | Source |
-| --- | --- | --- | --- |
-| REQ_SL_012 | SL_012 | An item needs a name | Product spec, "Add item", v3 |
-| REQ_SL_014 | SL_014 | A failed save keeps what the user typed | `AddItemViewModel.swift` |
 ```
-
-It answers the question every reviewer eventually asks: *"Says who?"* Some behavior comes from a written spec, and some only exists because the code does it. Writing that down makes the second kind visible, and it gives you a place to record conflicts ("the spec says X, the app does Y") instead of quietly picking one.
-
-## Balance the categories
-
-Left alone, a spec fills up with happy paths, because they're the easiest to write. A rough target keeps it honest:
-
-- **~20% `@happy_path`**: the journey works.
-- **~40% `@validation`**: inputs, limits and rejected actions.
-- **~40% `@edge_security`**: offline, slow, concurrent, unauthorized, and odd lifecycles.
-
-Treat the target as a prompt, not a quota. If one area drifts, ask what's missing; never add filler scenarios to fix the numbers.
-
-## Make scenarios cheap to test
-
-Traceability only helps if writing the test is easy. The tests that prove most scenarios are **behavior tests**: one user story, through the app's real composition root, with every network call answered from recorded fixtures. A sketch:
-
-```swift
-@Test
-func aSlowListShowsLoadingThenItsItems() async throws {
-    try await withFixtureApp(replies: ["GET /lists/{id}/items": .slow]) { app in
-        let list = app.makeShoppingList()
-        await list.load()
-        #expect(list.state.isLoading)
-
-        await app.gate.open()      // release the held "slow" reply, without sleeping
-        try await list.untilLoaded()
-        #expect(list.state.items.count == 3)
-    }
-}
+ShoppingList.feature:12: AddItemViewModelTests.anEmptyNameIsRejectd does not exist
+ShoppingList.feature:29: SL_020 has no test and no pending status
 ```
-
-A few properties make these tests trustworthy:
-
-- **No real time.** "Slow" replies are held until the test opens a gate, so there are no sleeps and no timing flakiness.
-- **A hard time limit.** A test that stalls fails after a few seconds instead of hanging the run.
-- **A leak check.** Objects the story creates are tracked, and the test fails if any outlive it.
-- **No assertions on visible text.** Copy changes, so assert on state and recorded calls.
-
-## One set of fixtures for every layer
-
-Record the backend's replies once, as JSON per endpoint and scenario: `happy`, `empty`, `slow`, and errors with real bodies. Then serve **the same files** to unit tests, behavior tests, snapshot tests and UI tests (through an in-app mock transport). Shared replies such as a generic 500 or offline live once, not copied into every endpoint.
-
-The payoff comes when the backend changes a field. A contract check that compares live replies with the fixtures catches it in one place, and every test layer sees the change. If UI tests use their own hand-written mock, they keep passing against a backend that no longer exists.
-
-## Prove it on every pull request
-
-The last piece is making all of this visible. Every pull request gets one comment with the result, updated on each push:
-
-```markdown
-| Check | Result |
-| --- | --- |
-| Spec traceability | ✅ passed |
-| Lint, PR rules, unit + behavior tests, coverage | ❌ failed |
-```
-
-Two choices make that report useful:
-
-1. **Stages don't stop each other.** Lint, static checks and the build run side by side, and the tests run whenever the build succeeds. One run lists *every* failure, so you don't fix one thing, rerun, and find the next.
-2. **Statuses mean something.** Plain pass/fail isn't enough:
-
-| Status | Meaning |
-| --- | --- |
-| PASSED | Ran, all green |
-| FAILED | A test or check failed |
-| FLAKY | Failed, then passed on a rerun. **Counts as failed** |
-| CRASHED | Crash or hang |
-| BLOCKED | Couldn't run: build failed, or the backend was unavailable |
-| SKIPPED | Out of scope for this change |
-
-"FLAKY counts as failed" is the rule that stops teams from normalising retries.
-
-This is what makes small, frequent merges safe. When every PR arrives with proof, trunk-based development stops being a leap of faith.
 
 ## What the checker can't prove
 
-Be honest about the gap. The script proves a link **exists**. It can't prove the test asserts what the `Then` lines say. A test called `anEmptyNameIsRejected` could check that the name is rejected and never look at the button.
+Be honest about the gap. The script proves a link **exists**. It can't prove the test checks what the `Then` lines say. A test called `anEmptyNameIsRejected` could check that the item isn't added and never look at the button.
 
-A Gherkin runner closes that gap by construction, because each `Then` line *is* code. Without one, it's a review rule:
+A Gherkin runner closes that gap, because each `Then` line *is* code. Without one, it's a review rule:
 
 > A scenario counts as covered only when its test asserts every `Then` line. If it asserts only some, extend the test or leave the scenario pending.
 
-In practice this is the main cost of the approach. The checker removes the drift; reviewers still have to judge whether the test is complete.
+That's the main cost of this approach. The script stops drift; reviewers still judge whether each test is complete.
 
 ## When to choose this over a runner
 
 **Choose spec + checker when:**
 - your platform's Gherkin tooling is weak (iOS today),
-- your tests are already in a framework you like (Swift Testing),
-- you want product people to read the spec but not to write executable steps.
+- your tests are already in a framework you like (Swift Testing or XCTest),
+- you want product people to read the spec, but not to write executable steps.
 
 **Choose a real runner when:**
 - non-engineers write new scenarios and expect them to run,
@@ -283,11 +358,11 @@ In practice this is the main cost of the approach. The checker removes the drift
 
 ## Wrapping up
 
-The approach comes down to four rules:
+BDD comes down to writing the behavior first, in words everyone can read, and then proving each piece with a test. On iOS you can do that with four rules:
 
-1. The `.feature` file is the contract; Swift tests are the proof.
+1. The `.feature` file says what the app should do; XCTest and Swift Testing tests prove it.
 2. Every scenario names its test, or says why it has none.
 3. A small script checks those links on every pull request.
-4. Reviewers check that a linked test asserts every `Then` line.
+4. Reviewers check that each test asserts every `Then` line.
 
-It's less magic than Cucumber, and that's the point: nothing to learn beyond Gherkin, Swift Testing and a short Python script.
+There's no new framework to learn: just Gherkin, the tests you already write, and a short Python script.
