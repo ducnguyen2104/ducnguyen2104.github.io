@@ -1,0 +1,12 @@
+baseURL = 'https://ducnguyen2104.github.io/'
+locale = 'en-us'
+title = 'BDD Without a Gherkin Runner'
+theme = 'PaperMod'
+
+[params]
+  author = 'Duc Nguyen'
+  defaultTheme = 'auto'
+  ShowReadingTime = true
+  ShowCodeCopyButtons = true
+  ShowToc = true
+
