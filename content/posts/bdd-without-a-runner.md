@@ -51,17 +51,20 @@ Here's a typical test without BDD:
 ```swift
 final class ShoppingListTests: XCTestCase {
     func testAddItem() async {
-        let viewModel = AddItemViewModel(store: InMemoryListStore())
+        let store = InMemoryListStore()
+        let viewModel = AddItemViewModel(store: store)
         viewModel.name = ""
         await viewModel.addTapped()
-        XCTAssertTrue(viewModel.items.isEmpty)
+        XCTAssertTrue(store.items.isEmpty)
     }
 }
 ```
 
-Nothing is wrong with it, but look at what's missing:
+Did that last line surprise you? It's called `testAddItem`, yet it expects the list to be **empty** after tapping Add. The test is correct: it checks that an item with an empty name is *rejected*. But you only find that out by spotting the `""` on the third line.
 
-- **The name doesn't say what's expected.** `testAddItem` could be testing anything. You have to read the code to learn the rule.
+That confusion is the point. The test works, but look at what's missing:
+
+- **The name doesn't say what's expected.** `testAddItem` hides the rule it checks. You have to read every line to work it out, as you just did.
 - **It's half a test.** The rule also says the button stays disabled, and nothing checks that. Nobody notices, because the rule was never written down.
 - **Only developers can review it.** A product manager can't look at this file and tell you whether the behavior is right.
 - **Gaps are invisible.** A folder of tests shows what *is* tested. It can't show what *isn't*: the offline case, the 200-character name, the double tap.
