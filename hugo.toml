@@ -1,6 +1,6 @@
 baseURL = 'https://ducnguyen2104.github.io/'
 locale = 'en-us'
-title = 'BDD Without a Gherkin Runner'
+title = "Duc's Tech Playground"
 theme = 'PaperMod'
 
 [params]
